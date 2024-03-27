@@ -2,9 +2,25 @@
 name = "linear-reminder"
 version = "0.1.0"
 edition = "2021"
+authors = ["Luke Hsiao <luke@hsiao.dev>"]
+description = "Simple webhook server for posting reminder comments to Linear.app"
+repository = "https://github.com/lukehsiao/linear-reminder"
+homepage = "https://github.com/lukehsiao/linear-reminder"
+license = "BlueOak-1.0.0"
+keywords = ["linear", "reminder", "webhook", "server", "shuttle"]
+publish = false
 
 [dependencies]
+anyhow = "1.0.81"
 axum = "0.7.5"
+config = { version = "0.14.0", features = ["toml"] }
+humantime = "2.1.0"
+serde = { version = "1.0.197", features = ["derive"] }
 shuttle-axum = "0.42.0"
 shuttle-runtime = "0.42.0"
+thiserror = "1.0.58"
 tokio = "1.36.0"
+tracing = "0.1.40"
+
+[dev-dependencies]
+pretty_assertions = "1.4.0"

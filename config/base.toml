@@ -1,0 +1,5 @@
+[linear]
+api_key = "insert-here"
+
+[application]
+time_to_remind = "30min"
