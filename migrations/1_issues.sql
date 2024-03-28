@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS issues (
+    id VARCHAR PRIMARY KEY,
+    updated_at TIMESTAMPTZ NOT NULL,
+    reminded BOOLEAN DEFAULT FALSE
+);
