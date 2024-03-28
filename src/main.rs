@@ -176,6 +176,25 @@ async fn dequeue_issue(pool: &PgPool) -> Result<Option<(PgTransaction, String, D
     }
 }
 
+async fn issue_in_db(transaction: &mut PgTransaction, id: &str) -> Result<bool> {
+    let r = sqlx::query!(
+        r#"
+        SELECT COUNT(*)
+        FROM issues  
+        WHERE id = $1
+        "#,
+        id
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+
+    if r.count == Some(1) {
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 #[post("/", format = "json", data = "<payload>")]
 async fn webhook(
     payload: Json<Payload>,
@@ -186,19 +205,28 @@ async fn webhook(
 
     // TODO: verify the signature of the webhook
 
-    // Use `ON CONFLICT DO NOTHING` because after the `time_to_remind`,
-    // we will check again, whether or not an issue was updated twice.
-    sqlx::query!(
-        "INSERT INTO issues( id, updated_at, reminded) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-        &payload.data.id,
-        payload.created_at,
-        false
-    )
-    .execute(&state.pool)
-    .await?;
-    info!(payload=?payload, "added issue to remind");
+    // Do everything in one transaction
+    let mut transaction = state.pool.begin().await?;
+    if payload.data.state.name == "Merged" {
+        // Use `ON CONFLICT DO NOTHING` because after the `time_to_remind`,
+        // we will check again, whether or not an issue was updated twice.
+        sqlx::query!(
+            "INSERT INTO issues( id, updated_at, reminded) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+            &payload.data.id,
+            payload.created_at,
+            false
+        )
+        .execute(&mut *transaction)
+        .await?;
+        info!(payload=?payload, "added issue to remind");
+    } else if let Ok(true) = issue_in_db(&mut transaction, &payload.data.id).await {
+        sqlx::query!("DELETE FROM issues WHERE id = $1", &payload.data.id)
+            .execute(&mut *transaction)
+            .await?;
+        info!(payload=?payload, "issue status is not merged");
+    }
 
-    // TODO: if task is already in the DB and reminded, and state.name != merged, delete the row
+    transaction.commit().await?;
     Ok(())
 }
 
@@ -231,8 +259,8 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
                         .expect("failed to convert Duration to TimeDelta")
                 {
                     info!(id=?(transaction, id, updated_at), "remind!");
-                    // Post reminder comment to Linear
-                    // Mark reminded = true
+                    // TODO: Post reminder comment to Linear
+                    // TODO: Mark reminded = true
                 }
             }
             interval.tick().await;
