@@ -120,3 +120,7 @@ release target:
 # Deploy to shuttle.rs
 deploy:
 	cargo shuttle deploy
+
+# View logs from shuttle.rs
+logs:
+	cargo shuttle logs

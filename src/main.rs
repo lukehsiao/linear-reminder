@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use rocket::{fairing::AdHoc, post, response::status::Created, routes, serde::json::Json, State};
+use rocket::{fairing::AdHoc, post, routes, serde::json::Json, State};
 use secrecy::SecretString;
 use serde::{Deserialize, Deserializer, Serialize};
 use shuttle_runtime::CustomError;
@@ -13,6 +13,17 @@ struct Issue {
     id: String,
     updated_at: DateTime<Utc>,
     reminded: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(crate = "rocket::serde")]
+struct Payload {
+    action: String,
+    data: String,
+    #[serde(rename = "type")]
+    event_type: String,
+    #[serde(alias = "createdAt")]
+    created_at: DateTime<Utc>,
 }
 
 type Result<T, E = rocket::response::Debug<sqlx::Error>> = std::result::Result<T, E>;
@@ -42,15 +53,16 @@ where
     }
 }
 
-#[post("/", data = "<issue>")]
-async fn create(
-    issue: Json<Issue>,
+#[post("/", data = "<payload>")]
+async fn webhook(
+    payload: Json<Payload>,
     state: &State<AppState>,
     app_config: &State<AppConfig>,
-) -> Result<Created<Json<Issue>>> {
+) -> Result<()> {
     info!(linear=?app_config.linear, time_to_remind=?app_config.time_to_remind, api_key=?app_config.linear.api_key, api_key=?app_config.linear.signing_key, "config");
+    info!(payload=?payload, "payload");
     sqlx::query("SELECT 1").fetch_one(&state.pool).await?;
-    Ok(Created::new("/").body(issue))
+    Ok(())
 }
 
 struct AppState {
@@ -68,7 +80,7 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
     let state = AppState { pool };
     let rocket = rocket::build()
         .attach(AdHoc::config::<AppConfig>())
-        .mount("/issues", routes![create])
+        .mount("/webhook/issue", routes![webhook])
         .manage(state);
     Ok(rocket.into())
 }

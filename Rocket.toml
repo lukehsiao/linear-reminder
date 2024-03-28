@@ -1,4 +1,4 @@
 [default]
-linear = { api_key = "insert-here", signing_key = "insert-here" }
+linear = { api_key = "insert-here", signing_key = "lin_wh_kOPtoYBEDezDm8ZQ3n0YCJ9qGqS3378PwErqhMNMLAOW" }
 time_to_remind = "30min"
 
