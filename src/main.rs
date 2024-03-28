@@ -111,7 +111,16 @@ struct Payload {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(crate = "rocket::serde")]
 struct IssueData {
-    identifier: String,
+    id: String,
+    state: StateData,
+    #[serde(skip)]
+    _ignored_fields: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(crate = "rocket::serde")]
+struct StateData {
+    name: String,
     #[serde(skip)]
     _ignored_fields: Option<Value>,
 }
@@ -143,15 +152,31 @@ where
     }
 }
 
-#[post("/", data = "<payload>")]
+#[post("/", format = "json", data = "<payload>")]
 async fn webhook(
     payload: Json<Payload>,
     state: &State<AppState>,
     app_config: &State<AppConfig>,
 ) -> Result<()> {
     info!(linear=?app_config.linear, time_to_remind=?app_config.time_to_remind, api_key=?app_config.linear.api_key, api_key=?app_config.linear.signing_key, "config");
-    info!(payload=?payload, "payload");
-    sqlx::query("SELECT 1").fetch_one(&state.pool).await?;
+
+    // TODO: verify the signature of the webhook
+
+    // Use `ON CONFLICT DO NOTHING` because after the `time_to_remind`,
+    // we will check again, whether or not an issue was updated twice.
+    sqlx::query(
+        "INSERT INTO issues( id, updated_at, reminded) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+    )
+    .bind(&payload.data.id)
+    .bind(payload.created_at)
+    .bind(false)
+    .execute(&state.pool)
+    .await?;
+    info!(payload=?payload, "added issue to remind");
+
+    // TODO: spawn a background task that will poll time until time_to_remind, remind, and then update the row in the DB.
+
+    // TODO: if task is already in the DB and reminded, and state.name != merged, delete the row
     Ok(())
 }
 
