@@ -160,7 +160,7 @@ async fn dequeue_issue(pool: &PgPool) -> Result<Option<(PgTransaction, String, D
         r#"
         SELECT id, updated_at, reminded
         FROM issues
-        WHERE reminded = false
+        WHERE reminded = FALSE
         ORDER BY updated_at ASC
         FOR UPDATE
         SKIP LOCKED
@@ -251,16 +251,27 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
         let mut interval = time::interval(Duration::from_secs(5));
         loop {
             let issue = dequeue_issue(&worker_pool).await;
-            if let Ok(Some((transaction, id, updated_at))) = issue {
+            if let Ok(Some((mut transaction, id, updated_at))) = issue {
                 let now = Utc::now();
 
                 if now.signed_duration_since(updated_at)
                     > TimeDelta::from_std(worker_config.time_to_remind)
                         .expect("failed to convert Duration to TimeDelta")
                 {
-                    info!(id=?(transaction, id, updated_at), "remind!");
                     // TODO: Post reminder comment to Linear
-                    // TODO: Mark reminded = true
+
+                    if let Ok(r) =
+                        sqlx::query!("UPDATE issues SET reminded = TRUE WHERE id = $1", &id)
+                            .execute(&mut *transaction)
+                            .await
+                    {
+                        if r.rows_affected() == 1 {
+                            let _ = transaction.commit().await;
+                            info!(id=%&id, updated_at=%&updated_at, "sent reminder");
+                        } else {
+                            let _ = transaction.rollback().await;
+                        }
+                    }
                 }
             }
             interval.tick().await;

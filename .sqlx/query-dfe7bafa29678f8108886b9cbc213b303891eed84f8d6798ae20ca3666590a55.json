@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, updated_at, reminded\n        FROM issues\n        WHERE reminded = false\n        ORDER BY updated_at ASC\n        FOR UPDATE\n        SKIP LOCKED\n        LIMIT 1\n        ",
+  "query": "\n        SELECT id, updated_at, reminded\n        FROM issues\n        WHERE reminded = FALSE\n        ORDER BY updated_at ASC\n        FOR UPDATE\n        SKIP LOCKED\n        LIMIT 1\n        ",
   "describe": {
     "columns": [
       {
@@ -28,5 +28,5 @@
       false
     ]
   },
-  "hash": "88d666876b27da4c19172c5e2fa681b937d5b16133da8d40dbc2fa654e9c3ac5"
+  "hash": "dfe7bafa29678f8108886b9cbc213b303891eed84f8d6798ae20ca3666590a55"
 }
