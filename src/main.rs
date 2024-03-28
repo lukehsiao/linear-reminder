@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
-use rocket::{
-    fairing::AdHoc, post, response::status::Created, routes, serde::json::Json, Config, State,
-};
-use serde::{Deserialize, Serialize};
+use rocket::{fairing::AdHoc, post, response::status::Created, routes, serde::json::Json, State};
+use secrecy::SecretString;
+use serde::{Deserialize, Deserializer, Serialize};
 use shuttle_runtime::CustomError;
 use sqlx::{Executor, PgPool};
+use std::time::Duration;
 use tracing::info;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -17,8 +17,37 @@ struct Issue {
 
 type Result<T, E = rocket::response::Debug<sqlx::Error>> = std::result::Result<T, E>;
 
+#[derive(Deserialize, Debug, Clone)]
+struct AppConfig {
+    linear: LinearConfig,
+    #[serde(deserialize_with = "deserialize_duration")]
+    time_to_remind: Duration,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct LinearConfig {
+    api_key: SecretString,
+}
+
+/// Custom deserializer from humantime to std::time::Duration
+fn deserialize_duration<'de, D>(deserializer: D) -> Result<std::time::Duration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    match s.parse::<humantime::Duration>() {
+        Ok(duration) => Ok(duration.into()),
+        Err(_) => Err(serde::de::Error::custom("Invalid duration format")),
+    }
+}
+
 #[post("/", data = "<issue>")]
-async fn create(issue: Json<Issue>, state: &State<AppState>) -> Result<Created<Json<Issue>>> {
+async fn create(
+    issue: Json<Issue>,
+    state: &State<AppState>,
+    app_config: &State<AppConfig>,
+) -> Result<Created<Json<Issue>>> {
+    info!(linear=?app_config.linear, time_to_remind=?app_config.time_to_remind, api_key=?app_config.linear.api_key, "config");
     sqlx::query("SELECT 1").fetch_one(&state.pool).await?;
     Ok(Created::new("/").body(issue))
 }
@@ -37,9 +66,8 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
 
     let state = AppState { pool };
     let rocket = rocket::build()
-        .attach(AdHoc::config::<Config>())
+        .attach(AdHoc::config::<AppConfig>())
         .mount("/issues", routes![create])
         .manage(state);
-
     Ok(rocket.into())
 }
