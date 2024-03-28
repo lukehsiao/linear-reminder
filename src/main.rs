@@ -1,5 +1,10 @@
 use chrono::{DateTime, Utc};
-use rocket::{fairing::AdHoc, post, routes, serde::json::Json, State};
+use rocket::{
+    fairing::AdHoc,
+    post, routes,
+    serde::json::{Json, Value},
+    State,
+};
 use secrecy::SecretString;
 use serde::{Deserialize, Deserializer, Serialize};
 use shuttle_runtime::CustomError;
@@ -15,15 +20,100 @@ struct Issue {
     reminded: bool,
 }
 
+/// We receive this in the webhook POST
+///
+/// Example:
+/// ```json
+/// {
+///   "action": "update",
+///   "actor": {
+///     "id": "2e6eea91-1e2c-43a4-9486-acea0603004e",
+///     "name": "Luke Hsiao"
+///   },
+///   "createdAt": "2024-03-28T05:10:45.264Z",
+///   "data": {
+///     "id": "bf740309-ed5f-48da-a0f7-b8b26e18b33b",
+///     "createdAt": "2024-03-23T15:32:11.774Z",
+///     "updatedAt": "2024-03-28T05:10:45.264Z",
+///     "number": 339,
+///     "title": "2023 Taxes",
+///     "priority": 2,
+///     "estimate": 4,
+///     "boardOrder": 0,
+///     "sortOrder": -11061.79,
+///     "startedAt": "2024-03-23T15:32:11.806Z",
+///     "labelIds": [],
+///     "teamId": "4d869526-74de-48de-92b2-2f0dc171849a",
+///     "cycleId": "8d86d606-8b1f-4387-aa34-e6f8dfc00ebc",
+///     "previousIdentifiers": [],
+///     "creatorId": "2e6eea91-1e2c-43a4-9486-acea0603004e",
+///     "assigneeId": "2e6eea91-1e2c-43a4-9486-acea0603004e",
+///     "stateId": "478ce2a9-1874-4cd0-b2ee-9dbe810352f9",
+///     "priorityLabel": "High",
+///     "botActor": {
+///       "id": "5c07d33f-5e8f-484b-8100-67908589ec45",
+///       "type": "workflow",
+///       "name": "Linear",
+///       "avatarUrl": "https://static.linear.app/assets/pwa/icon_maskable_512.png"
+///     },
+///     "identifier": "HSI-339",
+///     "url": "https://linear.app/hsiao/issue/HSI-339/2023-taxes",
+///     "assignee": {
+///       "id": "2e6eea91-1e2c-43a4-9486-acea0603004e",
+///       "name": "Luke Hsiao"
+///     },
+///     "cycle": {
+///       "id": "8d86d606-8b1f-4387-aa34-e6f8dfc00ebc",
+///       "number": 19,
+///       "startsAt": "2024-03-25T07:00:00.000Z",
+///       "endsAt": "2024-04-08T07:00:00.000Z"
+///     },
+///     "state": {
+///       "id": "478ce2a9-1874-4cd0-b2ee-9dbe810352f9",
+///       "color": "#f2c94c",
+///       "name": "In Progress",
+///       "type": "started"
+///     },
+///     "team": {
+///       "id": "4d869526-74de-48de-92b2-2f0dc171849a",
+///       "key": "HSI",
+///       "name": "Hsiao"
+///     },
+///     "subscriberIds": [
+///       "2e6eea91-1e2c-43a4-9486-acea0603004e",
+///       "233a3b9e-68d5-4e3e-b350-4b1f85ce733b"
+///     ],
+///     "labels": []
+///   },
+///   "updatedFrom": {
+///     "updatedAt": "2024-03-28T05:10:18.275Z",
+///     "sortOrder": 84.27,
+///     "stateId": "3e0d1574-f23c-441c-953d-42e08ad719eb"
+///   },
+///   "url": "https://linear.app/hsiao/issue/HSI-339/2023-taxes",
+///   "type": "Issue",
+///   "organizationId": "15a23696-00bb-44b4-ad4a-84e751d82d13",
+///   "webhookTimestamp": 1711602645358,
+///   "webhookId": "3f106cc1-617f-4398-83ed-238cece0b5e2"
+/// }
+/// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(crate = "rocket::serde")]
 struct Payload {
     action: String,
-    data: String,
     #[serde(rename = "type")]
     event_type: String,
     #[serde(alias = "createdAt")]
     created_at: DateTime<Utc>,
+    data: IssueData,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(crate = "rocket::serde")]
+struct IssueData {
+    identifier: String,
+    #[serde(skip)]
+    _ignored_fields: Option<Value>,
 }
 
 type Result<T, E = rocket::response::Debug<sqlx::Error>> = std::result::Result<T, E>;

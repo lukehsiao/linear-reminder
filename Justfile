@@ -122,5 +122,5 @@ deploy:
 	cargo shuttle deploy
 
 # View logs from shuttle.rs
-logs:
-	cargo shuttle logs
+logs *FLAGS:
+	cargo shuttle logs {{FLAGS}}
