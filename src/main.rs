@@ -27,6 +27,7 @@ struct AppConfig {
 #[derive(Deserialize, Debug, Clone)]
 struct LinearConfig {
     api_key: SecretString,
+    signing_key: SecretString,
 }
 
 /// Custom deserializer from humantime to std::time::Duration
@@ -47,7 +48,7 @@ async fn create(
     state: &State<AppState>,
     app_config: &State<AppConfig>,
 ) -> Result<Created<Json<Issue>>> {
-    info!(linear=?app_config.linear, time_to_remind=?app_config.time_to_remind, api_key=?app_config.linear.api_key, "config");
+    info!(linear=?app_config.linear, time_to_remind=?app_config.time_to_remind, api_key=?app_config.linear.api_key, api_key=?app_config.linear.signing_key, "config");
     sqlx::query("SELECT 1").fetch_one(&state.pool).await?;
     Ok(Created::new("/").body(issue))
 }
