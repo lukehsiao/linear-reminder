@@ -1,18 +1,22 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use rocket::{
     fairing::AdHoc,
     post, routes,
     serde::json::{Json, Value},
-    State,
+    Config, State,
 };
 use secrecy::SecretString;
 use serde::{Deserialize, Deserializer, Serialize};
 use shuttle_runtime::CustomError;
-use sqlx::{Executor, PgPool};
+use sqlx::{Executor, FromRow, PgPool, Postgres, Transaction};
 use std::time::Duration;
+use tokio::time;
 use tracing::info;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+type PgTransaction = Transaction<'static, Postgres>;
+type Result<T, E = rocket::response::Debug<sqlx::Error>> = std::result::Result<T, E>;
+
+#[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
 #[serde(crate = "rocket::serde")]
 struct Issue {
     id: String,
@@ -125,8 +129,6 @@ struct StateData {
     _ignored_fields: Option<Value>,
 }
 
-type Result<T, E = rocket::response::Debug<sqlx::Error>> = std::result::Result<T, E>;
-
 #[derive(Deserialize, Debug, Clone)]
 struct AppConfig {
     linear: LinearConfig,
@@ -152,6 +154,28 @@ where
     }
 }
 
+async fn dequeue_issue(pool: &PgPool) -> Result<Option<(PgTransaction, String, DateTime<Utc>)>> {
+    let mut transaction = pool.begin().await?;
+    let r = sqlx::query!(
+        r#"
+        SELECT id, updated_at, reminded
+        FROM issues
+        WHERE reminded = false
+        ORDER BY updated_at ASC
+        FOR UPDATE
+        SKIP LOCKED
+        LIMIT 1
+        "#,
+    )
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if let Some(r) = r {
+        Ok(Some((transaction, r.id, r.updated_at)))
+    } else {
+        Ok(None)
+    }
+}
+
 #[post("/", format = "json", data = "<payload>")]
 async fn webhook(
     payload: Json<Payload>,
@@ -164,17 +188,15 @@ async fn webhook(
 
     // Use `ON CONFLICT DO NOTHING` because after the `time_to_remind`,
     // we will check again, whether or not an issue was updated twice.
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO issues( id, updated_at, reminded) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+        &payload.data.id,
+        payload.created_at,
+        false
     )
-    .bind(&payload.data.id)
-    .bind(payload.created_at)
-    .bind(false)
     .execute(&state.pool)
     .await?;
     info!(payload=?payload, "added issue to remind");
-
-    // TODO: spawn a background task that will poll time until time_to_remind, remind, and then update the row in the DB.
 
     // TODO: if task is already in the DB and reminded, and state.name != merged, delete the row
     Ok(())
@@ -191,6 +213,31 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
         .await
         .map_err(CustomError::new)?;
     info!("ran database migrations");
+
+    // Worker: separate task which sends the reminder comments
+    let worker_pool = pool.clone();
+    let worker_config = Config::figment()
+        .extract::<AppConfig>()
+        .expect("failed to parse app config");
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(5));
+        loop {
+            let issue = dequeue_issue(&worker_pool).await;
+            if let Ok(Some((transaction, id, updated_at))) = issue {
+                let now = Utc::now();
+
+                if now.signed_duration_since(updated_at)
+                    > TimeDelta::from_std(worker_config.time_to_remind)
+                        .expect("failed to convert Duration to TimeDelta")
+                {
+                    info!(id=?(transaction, id, updated_at), "remind!");
+                    // Post reminder comment to Linear
+                    // Mark reminded = true
+                }
+            }
+            interval.tick().await;
+        }
+    });
 
     let state = AppState { pool };
     let rocket = rocket::build()
