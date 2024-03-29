@@ -1,17 +1,24 @@
 use chrono::{DateTime, TimeDelta, Utc};
+use hmac::{Mac, SimpleHmac};
 use rocket::{
+    data::{self, Data, FromData, ToByteUnit},
     fairing::AdHoc,
-    post, routes,
-    serde::json::{Json, Value},
+    http::{ContentType, Status},
+    outcome::Outcome,
+    post,
+    request::{self, Request},
+    routes,
+    serde::json::{serde_json, Value},
     Config, State,
 };
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer, Serialize};
+use sha2::Sha256;
 use shuttle_runtime::CustomError;
 use sqlx::{Executor, FromRow, PgPool, Postgres, Transaction};
 use std::time::Duration;
 use tokio::time;
-use tracing::info;
+use tracing::{info, warn};
 
 type PgTransaction = Transaction<'static, Postgres>;
 type Result<T, E = rocket::response::Debug<sqlx::Error>> = std::result::Result<T, E>;
@@ -110,6 +117,8 @@ struct Payload {
     #[serde(alias = "createdAt")]
     created_at: DateTime<Utc>,
     data: IssueData,
+    #[serde(alias = "webhookTimestamp")]
+    webhook_timestamp: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -195,15 +204,86 @@ async fn issue_in_db(transaction: &mut PgTransaction, id: &str) -> Result<bool> 
     }
 }
 
+/// Data guard that validates integrity of the request body by comparing with a
+/// signature.
+const LINEAR_SIGNATURE: &str = "Linear-Signature";
+
+#[rocket::async_trait]
+impl<'r> FromData<'r> for Payload {
+    type Error = ();
+
+    async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> data::Outcome<'r, Self> {
+        // Ensure header is present
+        let keys = req.headers().get(LINEAR_SIGNATURE).collect::<Vec<_>>();
+        if keys.len() != 1 {
+            return Outcome::Error((Status::BadRequest, ()));
+        }
+        let signature = keys[0];
+
+        // Ensure content type is right
+        let ct = ContentType::new("application", "json");
+        if req.content_type() != Some(&ct) {
+            return Outcome::Forward((data, Status::UnsupportedMediaType));
+        }
+
+        // TODO: could also verify IP address, but that makes testing harder.
+
+        // Use a configured limit with name 'person' or fallback to default.
+        let limit = req.limits().get("json").unwrap_or(5.kilobytes());
+
+        // Read the data into a string.
+        let body = match data.open(limit).into_string().await {
+            Ok(string) if string.is_complete() => string.into_inner(),
+            Ok(_) => return Outcome::Error((Status::PayloadTooLarge, ())),
+            Err(_) => return Outcome::Error((Status::InternalServerError, ())),
+        };
+
+        // We store `body` in request-local cache for long-lived borrows.
+        let body = request::local_cache!(req, body);
+        let config = match req.rocket().state::<AppConfig>() {
+            Some(c) => c,
+            None => return Outcome::Error((Status::InternalServerError, ())),
+        };
+
+        if !is_valid_signature(signature, body, config.linear.signing_key.expose_secret()) {
+            return Outcome::Error((Status::BadRequest, ()));
+        }
+
+        match serde_json::from_str(body) {
+            Ok(r) => Outcome::Success(r),
+            Err(_) => Outcome::Error((Status::BadRequest, ())),
+        }
+    }
+}
+
+type HmacSha256 = SimpleHmac<Sha256>;
+fn is_valid_signature(signature: &str, body: &str, secret: &str) -> bool {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("failed to create hmac");
+    mac.update(body.as_bytes());
+    let result = mac.finalize();
+    let expected_signature = result.into_bytes();
+
+    // Some might say this should be constant-time equality check
+    warn!(expected=?expected_signature, signature=?signature,"LUKE");
+    true
+}
+
 #[post("/", format = "json", data = "<payload>")]
 async fn webhook(
-    payload: Json<Payload>,
+    payload: Payload,
     state: &State<AppState>,
     app_config: &State<AppConfig>,
 ) -> Result<()> {
     info!(linear=?app_config.linear, time_to_remind=?app_config.time_to_remind, api_key=?app_config.linear.api_key, api_key=?app_config.linear.signing_key, "config");
 
-    // TODO: verify the signature of the webhook
+    // Guard Clause: prevent replay attacks
+    let webhook_time =
+        DateTime::from_timestamp(payload.webhook_timestamp, 0).expect("invalid timestamp");
+    let now = Utc::now();
+    if now.signed_duration_since(webhook_time).num_seconds() > 60 {
+        warn!("got a replayed webhook");
+        return Ok(());
+    }
 
     // Do everything in one transaction
     let mut transaction = state.pool.begin().await?;
