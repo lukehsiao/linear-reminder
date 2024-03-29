@@ -264,20 +264,18 @@ fn is_valid_signature(signature: &str, body: &str, secret: &str) -> bool {
     mac.update(body.as_bytes());
     let result = mac.finalize();
     let expected_signature = result.into_bytes();
+    let encoded = hex::encode(expected_signature);
 
     // Some might say this should be constant-time equality check
-    warn!(expected=?expected_signature, signature=?signature.as_bytes(),"LUKE");
-    true
+    encoded == signature
 }
 
 #[post("/", format = "json", data = "<payload>")]
 async fn webhook(
     payload: Payload,
     state: &State<AppState>,
-    app_config: &State<AppConfig>,
+    _app_config: &State<AppConfig>,
 ) -> Result<()> {
-    info!(linear=?app_config.linear, time_to_remind=?app_config.time_to_remind, api_key=?app_config.linear.api_key, api_key=?app_config.linear.signing_key, "config");
-
     // Guard Clause: prevent replay attacks
     let webhook_time =
         DateTime::from_timestamp(payload.webhook_timestamp, 0).expect("invalid timestamp");
@@ -354,13 +352,12 @@ async fn rocket(
                     > TimeDelta::from_std(worker_config.time_to_remind)
                         .expect("failed to convert Duration to TimeDelta")
                 {
-                    // TODO: Post reminder comment to Linear
                     let client = reqwest::Client::new();
                     let body = serde_json::json!({
                         "query": format!(r#"mutation CommentCreate {{
                             commentCreate(
                                 input: {{
-                                  body: "If this issue is QA-able, please write instructions and move to `QA Ready`. If not, mark it as `Done`. Thanks!"   
+                                  body: "If this issue is QA-able, please write instructions and move to `QA Ready`. If not, mark it as `Done`. Thanks!\n*This is an automated message.*"   
                                   issueId: "{}"
                                 }}
                             ) {{

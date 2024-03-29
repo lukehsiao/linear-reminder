@@ -1335,6 +1335,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "config",
+ "hex",
  "hmac",
  "humantime",
  "pretty_assertions",
