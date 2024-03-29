@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{env, time::Duration};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use hmac::{Mac, SimpleHmac};
@@ -266,7 +266,7 @@ fn is_valid_signature(signature: &str, body: &str, secret: &str) -> bool {
     let expected_signature = result.into_bytes();
 
     // Some might say this should be constant-time equality check
-    warn!(expected=?expected_signature, signature=?signature,"LUKE");
+    warn!(expected=?expected_signature, signature=?signature.as_bytes(),"LUKE");
     true
 }
 
@@ -317,7 +317,20 @@ struct AppState {
 }
 
 #[shuttle_runtime::main]
-async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::ShuttleRocket {
+async fn rocket(
+    #[shuttle_shared_db::Postgres] pool: PgPool,
+    #[shuttle_runtime::Secrets] secrets: shuttle_runtime::SecretStore,
+) -> shuttle_rocket::ShuttleRocket {
+    if let Some(secret) = secrets.get("ROCKET_LINEAR.API_KEY") {
+        env::set_var("ROCKET_LINEAR.API_KEY", secret)
+    }
+    if let Some(secret) = secrets.get("ROCKET_LINEAR.SIGNING_KEY") {
+        env::set_var("ROCKET_LINEAR.SIGNING_KEY", secret)
+    }
+    if let Some(secret) = secrets.get("ROCKET_TIME_TO_REMIND") {
+        env::set_var("ROCKET_TIME_TO_REMIND", secret)
+    }
+
     // Run single migration on startup.
     pool.execute(include_str!("../migrations/1_issues.sql"))
         .await
@@ -367,8 +380,10 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
                         .await
                     {
                         if !res.status().is_success() {
+                            let status = res.status();
+                            let text = res.text().await.unwrap_or_default();
                             // Try again later
-                            warn!(id=%id, updated_at=%updated_at,"failed to post comment, retrying later...");
+                            warn!(id=%id, updated_at=%updated_at, status=?status, msg=%text, "failed to post comment, retrying later...");
                             continue;
                         }
                     } else {
