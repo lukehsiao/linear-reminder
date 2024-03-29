@@ -1,5 +1,7 @@
 CREATE TABLE IF NOT EXISTS issues (
     id VARCHAR PRIMARY KEY,
+    identifier VARCHAR NOT NULL,
+    title VARCHAR NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     reminded BOOLEAN NOT NULL DEFAULT FALSE
 );

@@ -20,15 +20,16 @@ use sha2::Sha256;
 use shuttle_runtime::CustomError;
 use sqlx::{Executor, FromRow, PgPool, Postgres, Transaction};
 use tokio::time;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 type PgTransaction = Transaction<'static, Postgres>;
 type Result<T, E = rocket::response::Debug<sqlx::Error>> = std::result::Result<T, E>;
 
 #[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
-#[serde(crate = "rocket::serde")]
 struct Issue {
     id: String,
+    identifier: String,
+    title: String,
     updated_at: DateTime<Utc>,
     reminded: bool,
 }
@@ -127,6 +128,8 @@ struct Payload {
 #[serde(crate = "rocket::serde")]
 struct IssueData {
     id: String,
+    identifier: String,
+    title: String,
     state: StateData,
     #[serde(skip)]
     _ignored_fields: Option<Value>,
@@ -167,11 +170,11 @@ where
     }
 }
 
-async fn dequeue_issue(pool: &PgPool) -> Result<Option<(PgTransaction, String, DateTime<Utc>)>> {
+async fn dequeue_issue(pool: &PgPool) -> Result<Option<(PgTransaction, Issue)>> {
     let mut transaction = pool.begin().await?;
     let r = sqlx::query!(
         r#"
-        SELECT id, updated_at, reminded
+        SELECT id, identifier, title, updated_at, reminded
         FROM issues
         WHERE reminded = FALSE
         ORDER BY updated_at ASC
@@ -183,7 +186,16 @@ async fn dequeue_issue(pool: &PgPool) -> Result<Option<(PgTransaction, String, D
     .fetch_optional(&mut *transaction)
     .await?;
     if let Some(r) = r {
-        Ok(Some((transaction, r.id, r.updated_at)))
+        Ok(Some((
+            transaction,
+            Issue {
+                id: r.id,
+                updated_at: r.updated_at,
+                identifier: r.identifier,
+                title: r.title,
+                reminded: r.reminded,
+            },
+        )))
     } else {
         Ok(None)
     }
@@ -267,6 +279,7 @@ fn is_valid_signature(signature: &str, body: &str, secret: &str) -> bool {
     let result = mac.finalize();
     let expected_signature = result.into_bytes();
     let encoded = hex::encode(expected_signature);
+    debug!(encoded=%encoded, "actual signature");
 
     // Some might say this should be constant-time equality check
     encoded == signature
@@ -293,8 +306,10 @@ async fn webhook_linear(
         // Use `ON CONFLICT DO NOTHING` because after the `time_to_remind`,
         // we will check again, whether or not an issue was updated twice.
         sqlx::query!(
-            "INSERT INTO issues( id, updated_at, reminded) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+            "INSERT INTO issues( id, identifier, title, updated_at, reminded) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
             &payload.data.id,
+            &payload.data.identifier,
+            &payload.data.title,
             payload.created_at,
             false
         )
@@ -305,7 +320,7 @@ async fn webhook_linear(
         sqlx::query!("DELETE FROM issues WHERE id = $1", &payload.data.id)
             .execute(&mut *transaction)
             .await?;
-        info!(payload=?payload, "issue status is not merged");
+        info!(payload=?payload, "issue is no longer {}", app_config.linear.target_status);
     }
 
     transaction.commit().await?;
@@ -321,11 +336,18 @@ async fn rocket(
     #[shuttle_shared_db::Postgres] pool: PgPool,
     #[shuttle_runtime::Secrets] secrets: shuttle_runtime::SecretStore,
 ) -> shuttle_rocket::ShuttleRocket {
+    // Transfer Shuttle.rs Secrets to Env Vars
     if let Some(secret) = secrets.get("ROCKET_LINEAR.API_KEY") {
         env::set_var("ROCKET_LINEAR.API_KEY", secret)
     }
     if let Some(secret) = secrets.get("ROCKET_LINEAR.SIGNING_KEY") {
         env::set_var("ROCKET_LINEAR.SIGNING_KEY", secret)
+    }
+    if let Some(secret) = secrets.get("ROCKET_LINEAR.TARGET_STATUS") {
+        env::set_var("ROCKET_LINEAR.TARGET_STATUS", secret)
+    }
+    if let Some(secret) = secrets.get("ROCKET_LINEAR.MESSAGE") {
+        env::set_var("ROCKET_LINEAR.MESSAGE", secret)
     }
     if let Some(secret) = secrets.get("ROCKET_TIME_TO_REMIND") {
         env::set_var("ROCKET_TIME_TO_REMIND", secret)
@@ -337,7 +359,7 @@ async fn rocket(
         .map_err(CustomError::new)?;
     info!("ran database migrations");
 
-    // Worker: separate task which sends the reminder comments
+    // Worker Task: periodically checks and sends the reminder comments
     let worker_pool = pool.clone();
     let worker_config = Config::figment()
         .extract::<AppConfig>()
@@ -347,14 +369,15 @@ async fn rocket(
         loop {
             interval.tick().await;
             let issue = dequeue_issue(&worker_pool).await;
-            if let Ok(Some((mut transaction, id, updated_at))) = issue {
+            if let Ok(Some((mut transaction, issue_db))) = issue {
                 let now = Utc::now();
 
-                if now.signed_duration_since(updated_at)
+                if now.signed_duration_since(issue_db.updated_at)
                     > TimeDelta::from_std(worker_config.time_to_remind)
                         .expect("failed to convert Duration to TimeDelta")
                 {
                     let client = reqwest::Client::new();
+                    // Ref: https://developers.linear.app/docs/graphql/working-with-the-graphql-api#queries-and-mutations
                     let body = serde_json::json!({
                         "query": format!(r#"mutation CommentCreate {{
                             commentCreate(
@@ -365,7 +388,7 @@ async fn rocket(
                             ) {{
                                 success                            
                             }}
-                        }}"#, worker_config.linear.message, id)
+                        }}"#, worker_config.linear.message, issue_db.id)
                     });
                     if let Ok(res) = client
                         .post("https://api.linear.app/graphql")
@@ -381,24 +404,24 @@ async fn rocket(
                         if !res.status().is_success() {
                             let status = res.status();
                             let text = res.text().await.unwrap_or_default();
-                            // Try again later
-                            warn!(id=%id, updated_at=%updated_at, status=?status, msg=%text, "failed to post comment, retrying later...");
+                            warn!(issue=?issue_db, status=?status, msg=%text, "failed to post comment, retrying later...");
                             continue;
                         }
                     } else {
-                        // Try again later
-                        warn!(id=%id, updated_at=%updated_at,"failed to post comment, retrying later...");
+                        warn!(issue=?issue_db,"failed to post comment, retrying later...");
                         continue;
                     }
 
-                    if let Ok(r) =
-                        sqlx::query!("UPDATE issues SET reminded = TRUE WHERE id = $1", &id)
-                            .execute(&mut *transaction)
-                            .await
+                    if let Ok(r) = sqlx::query!(
+                        "UPDATE issues SET reminded = TRUE WHERE id = $1",
+                        &issue_db.id
+                    )
+                    .execute(&mut *transaction)
+                    .await
                     {
                         if r.rows_affected() == 1 {
                             let _ = transaction.commit().await;
-                            info!(id=%&id, updated_at=%&updated_at, "sent reminder");
+                            info!(issue=?issue_db, "sent reminder");
                         } else {
                             let _ = transaction.rollback().await;
                         }
