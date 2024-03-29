@@ -118,8 +118,8 @@ release target:
 	    print(new_version)
 
 # Deploy to shuttle.rs
-deploy:
-	cargo shuttle deploy
+deploy *FLAGS:
+	cargo shuttle deploy {{FLAGS}}
 
 # View logs from shuttle.rs
 logs *FLAGS:

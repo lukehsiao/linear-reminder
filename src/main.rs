@@ -1,5 +1,8 @@
+use std::time::Duration;
+
 use chrono::{DateTime, TimeDelta, Utc};
 use hmac::{Mac, SimpleHmac};
+use reqwest::header;
 use rocket::{
     data::{self, Data, FromData, ToByteUnit},
     fairing::AdHoc,
@@ -16,7 +19,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::Sha256;
 use shuttle_runtime::CustomError;
 use sqlx::{Executor, FromRow, PgPool, Postgres, Transaction};
-use std::time::Duration;
 use tokio::time;
 use tracing::{info, warn};
 
@@ -330,6 +332,7 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
     tokio::spawn(async move {
         let mut interval = time::interval(Duration::from_secs(5));
         loop {
+            interval.tick().await;
             let issue = dequeue_issue(&worker_pool).await;
             if let Ok(Some((mut transaction, id, updated_at))) = issue {
                 let now = Utc::now();
@@ -339,6 +342,40 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
                         .expect("failed to convert Duration to TimeDelta")
                 {
                     // TODO: Post reminder comment to Linear
+                    let client = reqwest::Client::new();
+                    let body = serde_json::json!({
+                        "query": format!(r#"mutation CommentCreate {{
+                            commentCreate(
+                                input: {{
+                                  body: "If this issue is QA-able, please write instructions and move to `QA Ready`. If not, mark it as `Done`. Thanks!"   
+                                  issueId: "{}"
+                                }}
+                            ) {{
+                                success                            
+                            }}
+                        }}"#, id)
+                    });
+                    if let Ok(res) = client
+                        .post("https://api.linear.app/graphql")
+                        .header(
+                            header::AUTHORIZATION,
+                            worker_config.linear.api_key.expose_secret(),
+                        )
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .json(&body)
+                        .send()
+                        .await
+                    {
+                        if !res.status().is_success() {
+                            // Try again later
+                            warn!(id=%id, updated_at=%updated_at,"failed to post comment, retrying later...");
+                            continue;
+                        }
+                    } else {
+                        // Try again later
+                        warn!(id=%id, updated_at=%updated_at,"failed to post comment, retrying later...");
+                        continue;
+                    }
 
                     if let Ok(r) =
                         sqlx::query!("UPDATE issues SET reminded = TRUE WHERE id = $1", &id)
@@ -354,7 +391,6 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
                     }
                 }
             }
-            interval.tick().await;
         }
     });
 
