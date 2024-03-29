@@ -357,7 +357,7 @@ async fn rocket(
                         "query": format!(r#"mutation CommentCreate {{
                             commentCreate(
                                 input: {{
-                                  body: "If this issue is QA-able, please write instructions and move to `QA Ready`. If not, mark it as `Done`. Thanks!\n*This is an automated message.*"   
+                                  body: "If this issue is QA-able, please write instructions and move to `QA Ready`. If not, mark it as `Done`. Thanks!\n\n*This is an automated message.*"
                                   issueId: "{}"
                                 }}
                             ) {{
