@@ -230,7 +230,7 @@ impl<'r> FromData<'r> for Payload {
 
         // TODO: could also verify IP address, but that makes testing harder.
 
-        // Use a configured limit with name 'person' or fallback to default.
+        // Use a configured limit with name 'json' or fallback to default.
         let limit = req.limits().get("json").unwrap_or(5.kilobytes());
 
         // Read the data into a string.
