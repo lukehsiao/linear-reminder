@@ -5,7 +5,4 @@ time_to_remind = '30min'
 api_key = 'insert-here'
 signing_key = 'insert-here'
 target_status = 'Merged'
-message = '''
-If this issue is QA-able, please write instructions and move to `QA Ready`. If not, mark it as `Done`. Thanks!
-
-*This is an automated message.*'''
+message = 'If this issue is QA-able, please write instructions and move to `QA Ready`. If not, mark it as `Done`. Thanks!\n\n*This is an automated message.*'
