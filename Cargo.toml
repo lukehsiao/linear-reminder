@@ -12,7 +12,6 @@ publish = false
 
 [dependencies]
 chrono = "0.4.37"
-config = { version = "0.14.0", features = ["toml"] }
 hex = "0.4.3"
 hmac = "0.12.1"
 humantime = "2.1.0"
