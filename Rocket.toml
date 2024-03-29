@@ -1,5 +1,5 @@
 [default]
-time_to_remind = '20sec'
+time_to_remind = '30min'
 
 [default.linear]
 api_key = 'insert-here'
