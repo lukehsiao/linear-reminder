@@ -151,6 +151,8 @@ struct AppConfig {
 struct LinearConfig {
     api_key: SecretString,
     signing_key: SecretString,
+    target_status: String,
+    message: String,
 }
 
 /// Custom deserializer from humantime to std::time::Duration
@@ -271,10 +273,10 @@ fn is_valid_signature(signature: &str, body: &str, secret: &str) -> bool {
 }
 
 #[post("/", format = "json", data = "<payload>")]
-async fn webhook(
+async fn webhook_linear(
     payload: Payload,
     state: &State<AppState>,
-    _app_config: &State<AppConfig>,
+    app_config: &State<AppConfig>,
 ) -> Result<()> {
     // Guard Clause: prevent replay attacks
     let webhook_time =
@@ -287,7 +289,7 @@ async fn webhook(
 
     // Do everything in one transaction
     let mut transaction = state.pool.begin().await?;
-    if payload.data.state.name == "Merged" {
+    if payload.data.state.name == app_config.linear.target_status {
         // Use `ON CONFLICT DO NOTHING` because after the `time_to_remind`,
         // we will check again, whether or not an issue was updated twice.
         sqlx::query!(
@@ -357,13 +359,13 @@ async fn rocket(
                         "query": format!(r#"mutation CommentCreate {{
                             commentCreate(
                                 input: {{
-                                  body: "If this issue is QA-able, please write instructions and move to `QA Ready`. If not, mark it as `Done`. Thanks!\n\n*This is an automated message.*"
+                                  body: "{}"
                                   issueId: "{}"
                                 }}
                             ) {{
                                 success                            
                             }}
-                        }}"#, id)
+                        }}"#, worker_config.linear.message, id)
                     });
                     if let Ok(res) = client
                         .post("https://api.linear.app/graphql")
@@ -409,7 +411,7 @@ async fn rocket(
     let state = AppState { pool };
     let rocket = rocket::build()
         .attach(AdHoc::config::<AppConfig>())
-        .mount("/webhook/issue", routes![webhook])
+        .mount("/webhooks/linear", routes![webhook_linear])
         .manage(state);
     Ok(rocket.into())
 }

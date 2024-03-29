@@ -1,4 +1,11 @@
 [default]
-linear = { api_key = "insert-here", signing_key = "insert-here" }
-time_to_remind = "20sec"
+time_to_remind = '20sec'
 
+[default.linear]
+api_key = 'insert-here'
+signing_key = 'insert-here'
+target_status = 'Merged'
+message = '''
+If this issue is QA-able, please write instructions and move to `QA Ready`. If not, mark it as `Done`. Thanks!
+
+*This is an automated message.*'''
