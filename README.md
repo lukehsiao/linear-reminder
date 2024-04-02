@@ -56,10 +56,8 @@ signing_key = 'insert-here'
 # The target status to send reminders for
 target_status = 'Merged'
 # The content of the comment to send as the reminder.
-message = '''
-If this issue is QA-able, please write instructions and move to `QA Ready`. If not, mark it as `Done`. Thanks!
-
-*This is an automated message.*'''
+# Must be a single line.
+message = 'If this issue is QA-able, please write instructions and move to `QA Ready`. If not, mark it as `Done`. Thanks!\n\n*This is an automated message.*'
 ```
 
 These can be overridden using [Shuttle Secrets](https://docs.shuttle.rs/resources/shuttle-secrets) when deployed.
