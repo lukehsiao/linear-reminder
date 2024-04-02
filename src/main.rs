@@ -265,10 +265,22 @@ impl<'r> FromData<'r> for Payload {
             return Outcome::Error((Status::BadRequest, ()));
         }
 
-        match serde_json::from_str(body) {
-            Ok(r) => Outcome::Success(r),
-            Err(_) => Outcome::Error((Status::BadRequest, ())),
+        let r: Payload = match serde_json::from_str(body) {
+            Ok(r) => r,
+            Err(_) => return Outcome::Error((Status::BadRequest, ())),
+        };
+
+        // Prevent replay attacks
+        let webhook_time = match DateTime::from_timestamp(r.webhook_timestamp, 0) {
+            Some(t) => t,
+            None => return Outcome::Error((Status::BadRequest, ())),
+        };
+        let now = Utc::now();
+        if now.signed_duration_since(webhook_time).num_seconds() > 60 {
+            return Outcome::Error((Status::BadRequest, ()));
         }
+
+        Outcome::Success(r)
     }
 }
 
@@ -291,15 +303,6 @@ async fn webhook_linear(
     state: &State<AppState>,
     app_config: &State<AppConfig>,
 ) -> Result<()> {
-    // Guard Clause: prevent replay attacks
-    let webhook_time =
-        DateTime::from_timestamp(payload.webhook_timestamp, 0).expect("invalid timestamp");
-    let now = Utc::now();
-    if now.signed_duration_since(webhook_time).num_seconds() > 60 {
-        warn!("got a replayed webhook");
-        return Ok(());
-    }
-
     // Do everything in one transaction
     let mut transaction = state.pool.begin().await?;
     if payload.data.state.name == app_config.linear.target_status {
