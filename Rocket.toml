@@ -1,5 +1,6 @@
 [default]
 time_to_remind = '30min'
+log_level = 'debug'
 
 [default.linear]
 api_key = 'insert-here'

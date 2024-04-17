@@ -36,6 +36,7 @@ struct Issue {
 
 /// We receive this in the webhook POST
 ///
+/// Ref: https://developers.linear.app/docs/graphql/webhooks#the-webhook-payload
 /// Example:
 /// ```json
 /// {
@@ -303,6 +304,7 @@ async fn webhook_linear(
     state: &State<AppState>,
     app_config: &State<AppConfig>,
 ) -> Result<()> {
+    info!(payload=?payload, "received payload");
     // Do everything in one transaction
     let mut transaction = state.pool.begin().await?;
     if payload.data.state.name == app_config.linear.target_status {
