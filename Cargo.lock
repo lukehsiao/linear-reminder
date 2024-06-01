@@ -2599,15 +2599,15 @@ dependencies = [
 
 [[package]]
 name = "shuttle-shared-db"
-version = "0.44.0"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f79157e7cd1e86f3661f3b45c0374ad9815fd65224b9573195ff8a9e6da2ab49"
+checksum = "e3879d1478ab726af83997d8573dbd93d45245eb9294bf19adb3b57a0cea41ca"
 dependencies = [
  "async-trait",
  "diesel-async",
  "serde",
  "serde_json",
- "shuttle-service 0.44.0",
+ "shuttle-service 0.45.0",
  "sqlx",
 ]
 
