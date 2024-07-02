@@ -117,7 +117,7 @@ release target:
 	    subprocess.run(["git", "tag", "-e", "-F", f.name, "-a", new_version])
 	    print(new_version)
 
-# Deploy to shuttle.rs
+# Deploy to shuttle.rs (e.g., just deploy --secrets Secrets.toml --ad)
 deploy *FLAGS:
 	cargo shuttle deploy {{FLAGS}}
 
