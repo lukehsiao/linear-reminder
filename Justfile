@@ -121,6 +121,10 @@ release target:
 deploy *FLAGS:
 	cargo shuttle deploy {{FLAGS}}
 
+# Restart container on shuttle.rs
+restart *FLAGS:
+	cargo shuttle project restart --idle-minutes 0 {{FLAGS}}
+
 # View logs from shuttle.rs
 logs *FLAGS:
 	cargo shuttle logs {{FLAGS}}
