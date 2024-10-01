@@ -28,4 +28,4 @@ tokio = "1.40.0"
 tracing = "0.1.40"
 
 [dev-dependencies]
-pretty_assertions = "1.4.0"
+pretty_assertions = "1.4.1"
