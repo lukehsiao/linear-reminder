@@ -36,7 +36,7 @@ struct Issue {
 
 /// We receive this in the webhook POST
 ///
-/// Ref: https://developers.linear.app/docs/graphql/webhooks#the-webhook-payload
+/// Ref: <https://developers.linear.app/docs/graphql/webhooks#the-webhook-payload>
 /// Example:
 /// ```json
 /// {
@@ -159,7 +159,7 @@ struct LinearConfig {
     message: String,
 }
 
-/// Custom deserializer from humantime to std::time::Duration
+/// Custom deserializer from humantime to `std::time::Duration`
 fn deserialize_duration<'de, D>(deserializer: D) -> Result<std::time::Duration, D::Error>
 where
     D: Deserializer<'de>,
@@ -257,9 +257,8 @@ impl<'r> FromData<'r> for Payload {
 
         // We store `body` in request-local cache for long-lived borrows.
         let body = request::local_cache!(req, body);
-        let config = match req.rocket().state::<AppConfig>() {
-            Some(c) => c,
-            None => return Outcome::Error((Status::InternalServerError, ())),
+        let Some(config) = req.rocket().state::<AppConfig>() else {
+            return Outcome::Error((Status::InternalServerError, ()));
         };
 
         if !is_valid_signature(signature, body, config.linear.signing_key.expose_secret()) {
@@ -272,9 +271,8 @@ impl<'r> FromData<'r> for Payload {
         };
 
         // Prevent replay attacks
-        let webhook_time = match DateTime::from_timestamp(r.webhook_timestamp, 0) {
-            Some(t) => t,
-            None => return Outcome::Error((Status::BadRequest, ())),
+        let Some(webhook_time) = DateTime::from_timestamp(r.webhook_timestamp, 0) else {
+            return Outcome::Error((Status::BadRequest, ()));
         };
         let now = Utc::now();
         if now.signed_duration_since(webhook_time).num_seconds() > 60 {
@@ -343,19 +341,19 @@ async fn rocket(
 ) -> shuttle_rocket::ShuttleRocket {
     // Transfer Shuttle.rs Secrets to Env Vars
     if let Some(secret) = secrets.get("ROCKET_LINEAR.API_KEY") {
-        env::set_var("ROCKET_LINEAR.API_KEY", secret)
+        env::set_var("ROCKET_LINEAR.API_KEY", secret);
     }
     if let Some(secret) = secrets.get("ROCKET_LINEAR.SIGNING_KEY") {
-        env::set_var("ROCKET_LINEAR.SIGNING_KEY", secret)
+        env::set_var("ROCKET_LINEAR.SIGNING_KEY", secret);
     }
     if let Some(secret) = secrets.get("ROCKET_LINEAR.TARGET_STATUS") {
-        env::set_var("ROCKET_LINEAR.TARGET_STATUS", secret)
+        env::set_var("ROCKET_LINEAR.TARGET_STATUS", secret);
     }
     if let Some(secret) = secrets.get("ROCKET_LINEAR.MESSAGE") {
-        env::set_var("ROCKET_LINEAR.MESSAGE", secret)
+        env::set_var("ROCKET_LINEAR.MESSAGE", secret);
     }
     if let Some(secret) = secrets.get("ROCKET_TIME_TO_REMIND") {
-        env::set_var("ROCKET_TIME_TO_REMIND", secret)
+        env::set_var("ROCKET_TIME_TO_REMIND", secret);
     }
 
     // Run single migration on startup.
