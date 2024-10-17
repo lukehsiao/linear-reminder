@@ -10,7 +10,7 @@
   <a href="https://github.com/lukehsiao/linear-reminder/actions/workflows/general.yml">
     <img src="https://img.shields.io/github/actions/workflow/status/lukehsiao/linear-reminder/general.yml" alt="Build Status">
   </a>
-  <a href="https://github.com/lukehsiao/linear-reminder/blob/main/LICENSE">
+  <a href="https://github.com/lukehsiao/linear-reminder/blob/main/LICENSE.md">
     <img src="https://img.shields.io/badge/License-BlueOak--1.0.0-blue" alt="License">
   </a>
 </div>
